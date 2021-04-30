@@ -20,15 +20,16 @@ public class Shuffler {
     }
 
     static void shuffle(String filename, String machines) {
-        BufferedReader bufferedReader;
+        Scanner scanner;
         HashMap<String, Vector<String>> hashMap = new HashMap<>(); // This holds the hash codes of all the keys
 
         try {
-            bufferedReader = new BufferedReader(new FileReader(filename));
+            scanner = new Scanner(new FileReader(filename));
             String line;
-            while ((line = bufferedReader.readLine()) != null) {
+            while (scanner.hasNextLine()) {
+                line = scanner.nextLine();
                 String[] keyAndValue = line.split(" ");
-                int fileHash = keyAndValue[0].hashCode();
+                int fileHash = Math.abs(keyAndValue[0].hashCode());
 
                 String key = String.valueOf(fileHash);
                 Vector<String> list = new Vector<>();

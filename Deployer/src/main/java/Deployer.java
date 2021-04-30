@@ -1,10 +1,15 @@
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.LineIterator;
+
 import java.io.*;
+import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 public class
 Deployer {
@@ -13,14 +18,18 @@ Deployer {
         String inputFile = Paths.get(args[1]).toAbsolutePath().toString();
         String projectPath = args[2];
         String setupFilesPath = args[3];
+        long ipsWithSplits = 0;
 
-        HashSet<String> workingIps = checkAvailableMachines(machines);
-        saveWorkingMachines(workingIps, projectPath);
+        ArrayList<String> workingIps = checkAvailableMachines(machines);
 
         if (!workingIps.isEmpty()) {
-            splitInputFile(inputFile, workingIps, projectPath);
+            ipsWithSplits = splitInputFile(inputFile, workingIps, projectPath);
+
+            System.out.println(ipsWithSplits);
         }
 
+        workingIps = workingIps.stream().limit(ipsWithSplits).collect(Collectors.toCollection(ArrayList::new));
+        saveWorkingMachines(workingIps, projectPath);
         initializeEnvironment(workingIps, setupFilesPath);
         startCommandRunner(workingIps, projectPath, setupFilesPath);
 
@@ -29,47 +38,40 @@ Deployer {
         System.exit(1);
     }
 
-    static void splitInputFile(String inputFile, HashSet<String> workingIps, String projectPath) throws IOException {
-        BufferedReader bufferedReader = new BufferedReader(new FileReader(inputFile));
-        ArrayList<String> lines = new ArrayList<>();
+    static int splitInputFile(String inputFile, ArrayList<String> workingIps, String projectPath) throws IOException {
+        System.out.println("[SPLITTER] Splitting " + inputFile + " into (" + workingIps.size() + ")");
+        LineIterator it = FileUtils.lineIterator(new File(inputFile), "UTF-8");
+        ArrayList<File> splitFiles = new ArrayList<>();
 
-        String line;
-        while ((line = bufferedReader.readLine()) != null) {
-            if (!line.isEmpty() || line.equals(""))
-                lines.add(line);
+        for (int i = 0; i < workingIps.size(); i++) {
+            splitFiles.add(new File(projectPath + "/splits/S-" + i + ".txt"));
         }
 
-        int workingMachinesCount = workingIps.size();
-        int counter = lines.size() / workingMachinesCount;
-        int remainder = lines.size() % workingMachinesCount;
+        int index = 0;
+        try {
+            while (it.hasNext()) {
+                String line = it.nextLine();
 
-        for (int i = 0; i < workingMachinesCount; i++) {
-            int start = i * counter;
-            int finish = (i * counter) + counter;
-
-            if (remainder > 0) {
-                finish += 1;
-                remainder--;
+                FileUtils.writeStringToFile(splitFiles.get(index % workingIps.size()), line + "\n", StandardCharsets.UTF_8, true);
+                index++;
             }
-            List<String> split = lines.subList(start, finish);
-            StringBuilder output = new StringBuilder();
-            split.forEach(s -> output.append(s).append("\n"));
-            Files.write(Paths.get(projectPath+"/splits/S-" + i + ".txt"), output.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-
+        return index;
     }
 
-    static void saveWorkingMachines(HashSet<String> workingMachines, String projectPath) throws IOException {
+    static void saveWorkingMachines(ArrayList<String> workingMachines, String projectPath) throws IOException {
         StringBuilder output = new StringBuilder();
         for (String machine : workingMachines) {
             output.append(machine).append("\n");
         }
 
-        Files.write(Paths.get(projectPath+"/machines.txt"), output.toString().getBytes(StandardCharsets.UTF_8));
+        Files.write(Paths.get(projectPath + "/machines.txt"), output.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     static void compileOutput(String projectPath) throws IOException {
-        File outputDir = new File(projectPath+"/output");
+        File outputDir = new File(projectPath + "/output");
         StringBuilder output = new StringBuilder();
 
         for (File file : Objects.requireNonNull(outputDir.listFiles())) {
@@ -86,7 +88,11 @@ Deployer {
 
     }
 
-    static void startCommandRunner(HashSet<String> workingIps, String projectPath, String setupFilesPath) throws IOException {
+    static boolean isNumeric(String s) {
+        return Double.isNaN(Double.parseDouble(s));
+    }
+
+    static void startCommandRunner(ArrayList<String> workingIps, String projectPath, String setupFilesPath) throws IOException {
         AtomicInteger index = new AtomicInteger(0);
         ArrayList<String> mapProcess = new ArrayList<>();
         ArrayList<String> shuffleProcess = new ArrayList<>();
@@ -94,10 +100,11 @@ Deployer {
         ArrayList<Process> masterProcs = new ArrayList<>();
         int workingMachinesCount = workingIps.size();
 
+        double total = 0.0;
 
         for (String ip : workingIps) {
-            ProcessBuilder master = new ProcessBuilder("/usr/lib/jvm/default-java/bin/java", "-jar",
-                    setupFilesPath+"CommandRunner/target/CommandRunner-1.0-SNAPSHOT.jar", ip, String.valueOf(index.get()), projectPath+"/machines.txt", projectPath);
+            ProcessBuilder master = new ProcessBuilder("/usr/lib/jvm/default-java/bin/java", "-Xms2048m", "-Xmx2048m", "-jar",
+                    setupFilesPath + "/CommandRunner/target/CommandRunner-1.0-SNAPSHOT.jar", ip, String.valueOf(index.get()), projectPath + "/machines.txt", projectPath);
 
             System.out.println("Starting program on [" + ip + "] [index " + index + "] : ");
 
@@ -112,19 +119,25 @@ Deployer {
             try {
 
 
-                boolean timeout = p.waitFor(50, TimeUnit.SECONDS);
+                boolean timeout = p.waitFor(50, TimeUnit.MINUTES);
 
                 if (!timeout) {
                     System.out.println("There is a timeout");
                     p.destroyForcibly();
                 }
 
-                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-
+                Scanner scanner = new Scanner(p.getInputStream());
                 String results;
 
-                while ((results = bufferedReader.readLine()) != null) {
+                while (scanner.hasNextLine()) {
+                    results = scanner.nextLine();
+                    if (results.contains("TOTAL")) {
+                        String _results = results;
+                        String[] totals = _results.split(" ");
+                        total += Double.parseDouble(totals[2]);
+//                        System.out.println(Arrays.toString(totals));
+//                        Arrays.stream(totals).filter(s->!isNumeric(s))
+                    }
                     System.out.println("Output: " + results);
                     if (results.contains("/tmp/amponsem/maps/")) {
                         mapProcess.add(results);
@@ -137,13 +150,16 @@ Deployer {
                     }
                 }
 
-                while ((results = errorReader.readLine()) != null) {
-                    System.out.println("Error: " + results);
+                scanner = new Scanner(p.getErrorStream());
+                while (scanner.hasNextLine()) {
+                    results = scanner.nextLine();
+                    System.out.println("[ERROR] " + results);
                 }
+
 
                 p.destroy();
 
-            } catch (IOException | InterruptedException e) {
+            } catch (InterruptedException e) {
                 e.printStackTrace();
             }
 
@@ -161,107 +177,92 @@ Deployer {
             }
 
         }
+        System.out.println("[PROGRAM-TOTAL] " + total + " ms");
         System.out.println("Ending program...");
     }
 
-    static HashSet<String> checkAvailableMachines(String machines) throws IOException {
-        FileInputStream remoteIps = new FileInputStream(machines);
-        BufferedReader bufferedReader;
-        ProcessBuilder processBuilder = new ProcessBuilder();
+    static public String ping(Process p, String ip) throws IOException {
+        return getString(p, ip);
+    }
 
-        HashSet<String> workingIps = new HashSet<>();
+    private static String getString(Process p, String ip) {
+        boolean worked = false;
 
-        try {
-            bufferedReader = new BufferedReader(new InputStreamReader(remoteIps));
-            String ip;
+        Scanner success = new Scanner(p.getInputStream());
 
-            while ((ip = bufferedReader.readLine()) != null) {
-                ExecutorService executor = Executors.newSingleThreadExecutor();
-                String finalIp = ip.trim();
-                if (!finalIp.equals("") && finalIp.matches("^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])(\\.(?!$)|$)){4}$")) {
-                    Future<String> future = executor.submit(() -> {
-                        processBuilder.command("ping", "-c", "2", finalIp);
-                        Process p = processBuilder.start();
+        if (success.hasNextLine()) {
+            worked = true;
+        }
 
-                        BufferedReader commandOuput = new BufferedReader(new InputStreamReader(p.getInputStream()));
+        success.close();
 
+        p.destroy();
+        return worked ? ip : null;
+    }
 
-                        if (commandOuput.readLine() != null) {
-                            ProcessBuilder sshConnection = new ProcessBuilder("ssh", "-o StrictHostKeyChecking=no", "amponsem@" + finalIp);
+    static ArrayList<String> checkAvailableMachines(String machines) throws IOException {
+        Scanner scanner = new Scanner(new FileInputStream(machines));
+//        ArrayList<String> workingIps = new ArrayList<>();
+        ArrayList<String> ips = new ArrayList<>();
+        HashMap<Process, String> processes = new HashMap<>();
 
-                            Process sshProcess = sshConnection.start();
+        while (scanner.hasNextLine()) {
+            ips.add(scanner.nextLine());
+        }
 
-                            BufferedReader sshBufferedReader = new BufferedReader(new InputStreamReader(sshProcess.getInputStream()));
-                            while (sshBufferedReader.readLine() != null) {
-                                workingIps.add(finalIp);
-                            }
-                            sshBufferedReader.close();
+        scanner.close();
 
-                            InputStream errorStream = sshProcess.getErrorStream();
-                            BufferedReader bufferedErrorReader = new BufferedReader(new InputStreamReader(errorStream));
+        for (String ip : ips) {
+            System.out.println("[PING] " + ip);
+            ProcessBuilder processBuilder = new ProcessBuilder("ping", "-c 1", ip);
+            Process p = processBuilder.start();
+            processes.put(p, ip);
+        }
 
-                            String errorLine;
+        ips.clear();
+        processes.forEach((p, ip) -> {
+            try {
+                ips.add(ping(p, ip));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
 
-                            while ((errorLine = bufferedErrorReader.readLine()) != null) {
-                                System.out.println("Error: " + errorLine);
-                            }
-                            sshBufferedReader.close();
-                            sshProcess.destroyForcibly();
+        return ips;
+    }
 
-                        }
+    static Process setupProcess(ProcessBuilder processBuilder) throws IOException {
+        Process p = processBuilder.start();
 
-                        InputStream errorStream = processBuilder.start().getErrorStream();
-                        BufferedReader bufferedErrorReader = new BufferedReader(new InputStreamReader(errorStream));
+        String scpError;
 
-                        String errorLine;
+        try (BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getErrorStream())); BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            while ((scpError = successStream.readLine()) != null) {
+                System.out.println("Output: " + scpError);
+            }
 
-                        while ((errorLine = bufferedErrorReader.readLine()) != null) {
-                            System.out.println("Error: " + errorLine);
-                        }
-                        p.destroyForcibly();
-                        return "OK";
-                    });
-                    try {
-                        System.out.println(future.get(2, TimeUnit.SECONDS)); //timeout is in 2 seconds
-                    } catch (TimeoutException ignored) {
-
-                    }
-                    executor.shutdownNow();
-
-                }
-
+            while ((scpError = errorStream.readLine()) != null) {
+                System.out.println("Error: " + scpError);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        return workingIps;
+        return p;
     }
 
     static void copySlaveProgram(String ip, String setupFilesPath) {
         ProcessBuilder scpProcessBuilder = new ProcessBuilder("scp",
-                setupFilesPath+"/Mapper/target/mapper-1.0-SNAPSHOT.jar",
-                setupFilesPath+"/Shuffler/target/shuffler-1.0-SNAPSHOT.jar",
-                setupFilesPath+"/Reducer/target/reducer-1.0-SNAPSHOT.jar",
+                setupFilesPath + "/Mapper/target/mapper-1.0-SNAPSHOT.jar",
+                setupFilesPath + "/Shuffler/target/shuffler-1.0-SNAPSHOT.jar",
+                setupFilesPath + "/Reducer/target/reducer-1.0-SNAPSHOT.jar",
                 "amponsem@" + ip + ":/tmp/amponsem");
 
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<String> future = executor.submit(() -> {
             try {
-                Process scpProcess = scpProcessBuilder.start();
-
-                BufferedReader scpErrorStream = new BufferedReader(new InputStreamReader(scpProcess.getErrorStream()));
-                BufferedReader scpSuccessStream = new BufferedReader(new InputStreamReader(scpProcess.getInputStream()));
-                String scpError;
-
-                while ((scpError = scpSuccessStream.readLine()) != null) {
-                    System.out.println("Output: " + scpError);
-                }
-
-                while ((scpError = scpErrorStream.readLine()) != null) {
-                    System.out.println("Error: " + scpError);
-                }
+                Process scpProcess = setupProcess(scpProcessBuilder);
                 scpProcess.destroyForcibly();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -279,43 +280,37 @@ Deployer {
     }
 
     static void makeRootDirectory(String ip) throws IOException {
-        ProcessBuilder mkdirProcessBuilder = new ProcessBuilder("ssh", "-o StrictHostKeyChecking=no", "amponsem@" + ip,
+        ProcessBuilder mkdirProcessBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip,
                 "mkdir -p /tmp/amponsem/");
 
+        Process mkdirProcess = setupProcess(mkdirProcessBuilder);
 
-        Process mkdirProcess = mkdirProcessBuilder.start();
-
-        BufferedReader successStream = new BufferedReader(new InputStreamReader(mkdirProcess.getInputStream()));
-        String successLine;
-        while ((successLine = successStream.readLine()) != null) {
-            System.out.println("Output: " + successLine);
-        }
-        successStream.close();
         mkdirProcess.destroyForcibly();
     }
 
-    static void initializeEnvironment(HashSet<String> workingIps, String setupFilesPath) {
+    static void initializeEnvironment(ArrayList<String> workingIps, String setupFilesPath) {
         workingIps.forEach(ip -> {
 
             System.out.println("IP: " + ip);
-            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o StrictHostKeyChecking=no", "amponsem@" + ip, "ls /tmp/amponsem");
+            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip, "ls /tmp/amponsem");
 
 
             try {
                 Process p = processBuilder.start();
 
-                BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-                BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getInputStream()));
                 String line;
 
-                while ((line = successStream.readLine()) != null) {
-                    System.out.println("Output: " + line);
+                try (BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+                     BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    while ((line = successStream.readLine()) != null) {
+                        System.out.println("Output: " + line);
+                    }
+                    while (errorStream.readLine() != null) {
+                        makeRootDirectory(ip);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-
-                while (errorStream.readLine() != null) {
-                    makeRootDirectory(ip);
-                }
-                errorStream.close();
 
                 copySlaveProgram(ip, setupFilesPath);
 

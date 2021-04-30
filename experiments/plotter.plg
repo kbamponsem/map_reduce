@@ -1,0 +1,10 @@
+set term postscript eps color 18
+set ytic auto
+
+set output output_file
+set title "Latency against number of node"
+set xlabel "Number of nodes"
+set ylabel "Latency (ms)"
+plot input_file with linespoints pt 2 lw 3 lc 'blue' notitle
+set output
+quit

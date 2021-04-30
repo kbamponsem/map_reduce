@@ -1,0 +1,17 @@
+mine, 1
+book, 2
+for, 1
+bag, 2
+I, 1
+is, 1
+best, 1
+am, 1
+good, 3
+boy, 1
+tool, 1
+the, 1
+fell, 1
+me, 2
+tag, 1
+Fell, 1
+tis, 1

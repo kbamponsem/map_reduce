@@ -1,50 +1,33 @@
 #!/bin/bash
 
 
-help() {
-	printf "args:\n\t--data-file=[input text file]\n\t--project-path=[your project path]\n\t--ips=[your ips file]\n"
+
+sequential() 
+{
+	java -Xms2048m -Xmx2048m -jar Sequential/target/Sequential-1.0-SNAPSHOT.jar $1	
 }
 
-if [ $# == 0 ];
-then
-	printf "Please provide 3 arguments!\n"
-	help
-elif [ $# == 1 && $1 == **help** || $1 == **--help** ];
-then 
-	help
-fi
+map_reduce() 
+{
 
-map_reduce() {
-	if [ $# == 1 ];
-	then 
-		help
-		return 0
-	fi
+	INPUT_FILE=$(realpath $1)
+	PROJECT_ROOT=$(realpath $2)
+	REMOTE_MACHINES_FILE=$(realpath $3)
 
-	args=($@)
-	for arg in "${args[@]}"
-	do
-		case $arg in 
-			**--data-file**)
-
-				path=$(echo $arg | cut --delimiter='=' --fields=2)
-				INPUT_FILE=$(realpath $path);;
-			**--ips**)
-				path=$(echo $arg | cut --delimiter='=' --fields=2)
-				REMOTE_MACHINES_FILE=$(realpath $path);;
-			**--project-path**)
-				path=$(echo $arg | cut --delimiter='=' --fields=2)
-				PROJECT_ROOT=$(realpath $path);;
-		esac
-	done
-
+	echo INPUT FILE $INPUT_FILE
+	echo PROJECT ROOT $PROJECT_ROOT 
+	echo REMOTE MACHINES FILE $REMOTE_MACHINES_FILE
 
 
 	# File containing remote machines
 	OUTPUT_FOLDER=$PROJECT_ROOT/output
 	SPLITS_FOLDER=$PROJECT_ROOT/splits
-	SETUP_FILES_FOLDER=$(dirname "${BASH_SOURCE[0]}")
-	SETUP_FILES_FOLDER=$(realpath $SETUP_FILES_FOLDER)/../
+	SETUP_FILE=$(realpath "${BASH_SOURCE[0]}")
+
+	echo $SETUP_FILE
+
+	SETUP_FILES_FOLDER=${SETUP_FILE%%/executor/setup.sh}
+	SETUP_FILES_FOLDER=$(realpath $SETUP_FILES_FOLDER)
 	echo $SETUP_FILES_FOLDER
 
 	rm -rf $SPLITS_FOLDER
@@ -56,22 +39,11 @@ map_reduce() {
 
 	#Clean remote computers
 	echo "Executing cleaner..."
-	local cleaner_results=$(java -jar $SETUP_FILES_FOLDER/Cleaner/target/cleaner-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE)
-	echo -e $cleaner_results
+	java -jar $SETUP_FILES_FOLDER/Cleaner/target/cleaner-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE
 
+	echo "Executing deployer..."
+	java -Xms2048m -Xmx2048m -jar $SETUP_FILES_FOLDER/Deployer/target/deployer-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE $INPUT_FILE $PROJECT_ROOT $SETUP_FILES_FOLDER | tee >(grep "TIME-TAKEN") >(grep "PROGRAM-TOTAL") > /dev/null
 
-	# Deploy program to remote machines
-	if [ "$cleaner_results" == "[CLEANER] Done for (0) machines!" ];
-	then
-		return 0
-	else
-		echo "Executing deployer..."
-		java -jar $SETUP_FILES_FOLDER/Deployer/target/deployer-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE $INPUT_FILE $PROJECT_ROOT $SETUP_FILES_FOLDER #| grep "TIME-TAKEN"
-	fi
-
-	# List files in output directory
-	printf "\nFiles created:"
-	ls $OUTPUT_FOLDER
 }
 
 
