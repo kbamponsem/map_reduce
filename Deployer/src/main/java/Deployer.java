@@ -2,7 +2,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.LineIterator;
 
 import java.io.*;
-import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -11,8 +10,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-public class
-Deployer {
+public class Deployer {
     public static void main(String[] args) throws IOException {
         String machines = args[0];
         String inputFile = Paths.get(args[1]).toAbsolutePath().toString();
@@ -52,7 +50,8 @@ Deployer {
             while (it.hasNext()) {
                 String line = it.nextLine();
 
-                FileUtils.writeStringToFile(splitFiles.get(index % workingIps.size()), line + "\n", StandardCharsets.UTF_8, true);
+                FileUtils.writeStringToFile(splitFiles.get(index % workingIps.size()), line + "\n",
+                        StandardCharsets.UTF_8, true);
                 index++;
             }
         } catch (Exception e) {
@@ -75,11 +74,12 @@ Deployer {
         StringBuilder output = new StringBuilder();
 
         for (File file : Objects.requireNonNull(outputDir.listFiles())) {
-            BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
-            String line;
+            try (BufferedReader bufferedReader = new BufferedReader(new FileReader(file))) {
+                String line;
 
-            while ((line = bufferedReader.readLine()) != null) {
-                output.append(line).append("\n");
+                while ((line = bufferedReader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
             }
         }
 
@@ -92,7 +92,8 @@ Deployer {
         return Double.isNaN(Double.parseDouble(s));
     }
 
-    static void startCommandRunner(ArrayList<String> workingIps, String projectPath, String setupFilesPath) throws IOException {
+    static void startCommandRunner(ArrayList<String> workingIps, String projectPath, String setupFilesPath)
+            throws IOException {
         AtomicInteger index = new AtomicInteger(0);
         ArrayList<String> mapProcess = new ArrayList<>();
         ArrayList<String> shuffleProcess = new ArrayList<>();
@@ -103,8 +104,9 @@ Deployer {
         double total = 0.0;
 
         for (String ip : workingIps) {
-            ProcessBuilder master = new ProcessBuilder("/usr/lib/jvm/default-java/bin/java", "-Xms2048m", "-Xmx2048m", "-jar",
-                    setupFilesPath + "/CommandRunner/target/CommandRunner-1.0-SNAPSHOT.jar", ip, String.valueOf(index.get()), projectPath + "/machines.txt", projectPath);
+            ProcessBuilder master = new ProcessBuilder("java", "-Xms2048m", "-Xmx2048m", "-jar",
+                    setupFilesPath + "/CommandRunner/target/CommandRunner-1.0-SNAPSHOT.jar", ip,
+                    String.valueOf(index.get()), projectPath + "/machines.txt", projectPath);
 
             System.out.println("Starting program on [" + ip + "] [index " + index + "] : ");
 
@@ -117,7 +119,6 @@ Deployer {
 
         for (Process p : masterProcs) {
             try {
-
 
                 boolean timeout = p.waitFor(50, TimeUnit.MINUTES);
 
@@ -135,8 +136,6 @@ Deployer {
                         String _results = results;
                         String[] totals = _results.split(" ");
                         total += Double.parseDouble(totals[2]);
-//                        System.out.println(Arrays.toString(totals));
-//                        Arrays.stream(totals).filter(s->!isNumeric(s))
                     }
                     System.out.println("Output: " + results);
                     if (results.contains("/tmp/amponsem/maps/")) {
@@ -150,19 +149,21 @@ Deployer {
                     }
                 }
 
-                scanner = new Scanner(p.getErrorStream());
-                while (scanner.hasNextLine()) {
-                    results = scanner.nextLine();
-                    System.out.println("[ERROR] " + results);
+                try (Scanner pScanner = new Scanner(p.getErrorStream());) {
+
+                    while (scanner.hasNextLine()) {
+                        results = scanner.nextLine();
+                        System.out.println("[ERROR] " + results);
+                    }
+
+                    p.destroy();
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-
-
-                p.destroy();
 
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
-
 
         }
         if (workingMachinesCount > 0) {
@@ -202,7 +203,7 @@ Deployer {
 
     static ArrayList<String> checkAvailableMachines(String machines) throws IOException {
         Scanner scanner = new Scanner(new FileInputStream(machines));
-//        ArrayList<String> workingIps = new ArrayList<>();
+        // ArrayList<String> workingIps = new ArrayList<>();
         ArrayList<String> ips = new ArrayList<>();
         HashMap<Process, String> processes = new HashMap<>();
 
@@ -236,7 +237,8 @@ Deployer {
 
         String scpError;
 
-        try (BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getErrorStream())); BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+        try (BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+                BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
             while ((scpError = successStream.readLine()) != null) {
                 System.out.println("Output: " + scpError);
             }
@@ -258,7 +260,6 @@ Deployer {
                 setupFilesPath + "/Reducer/target/reducer-1.0-SNAPSHOT.jar",
                 "amponsem@" + ip + ":/tmp/amponsem");
 
-
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<String> future = executor.submit(() -> {
             try {
@@ -272,7 +273,7 @@ Deployer {
         });
 
         try {
-            System.out.println(future.get(10, TimeUnit.SECONDS)); //timeout is in 10 seconds
+            System.out.println(future.get(10, TimeUnit.SECONDS)); // timeout is in 10 seconds
         } catch (TimeoutException | InterruptedException | ExecutionException e) {
             System.err.println("Timeout");
         }
@@ -292,8 +293,8 @@ Deployer {
         workingIps.forEach(ip -> {
 
             System.out.println("IP: " + ip);
-            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip, "ls /tmp/amponsem");
-
+            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip,
+                    "ls /tmp/amponsem");
 
             try {
                 Process p = processBuilder.start();
@@ -301,7 +302,7 @@ Deployer {
                 String line;
 
                 try (BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-                     BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                        BufferedReader successStream = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                     while ((line = successStream.readLine()) != null) {
                         System.out.println("Output: " + line);
                     }
