@@ -1,10 +1,17 @@
 import java.io.*;
 import java.util.*;
-import java.util.concurrent.*;
 
 public class Cleaner {
+    public static String username;
+
     public static void main(String[] args) throws IOException {
+        if (args.length != 2) {
+            System.out.println("Invalid args length!");
+            return;
+        }
         String machines = args[0];
+        username = args[1];
+        System.out.println("Username: " + username);
         HashSet<String> workingIps = checkAvailableMachines(machines);
         cleanRemoteFolder(workingIps);
         System.exit(1);
@@ -18,7 +25,8 @@ public class Cleaner {
         System.out.println(Arrays.toString(workingIps.toArray()));
         for (String ip : workingIps) {
             if (ip != null) {
-                ProcessBuilder processBuilder = new ProcessBuilder("ssh","-o ConnectTimeout=2", "amponsem@" + ip, "rm -rf /tmp/amponsem");
+                ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", username + "@" + ip,
+                        String.format("rm -rf /tmp/%s", username));
                 Process p;
                 try {
                     p = processBuilder.start();
@@ -45,7 +53,8 @@ public class Cleaner {
             p.destroy();
         }
         if (noError) {
-            System.out.println("[CLEANER] Done for (" + workingIps.stream().filter(Objects::nonNull).count() + ") machines!");
+            System.out.println(
+                    "[CLEANER] Done for (" + workingIps.stream().filter(Objects::nonNull).count() + ") machines!");
         }
     }
 
@@ -108,7 +117,7 @@ public class Cleaner {
         for (String ip : ips) {
             if (ip != null) {
                 System.out.println("[CLEANER] " + ip);
-                ProcessBuilder sshConnection = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip);
+                ProcessBuilder sshConnection = new ProcessBuilder("ssh", "-o ConnectTimeout=2", username + "@" + ip);
                 Process sshProcess = sshConnection.start();
 
                 processes.put(sshProcess, ip);

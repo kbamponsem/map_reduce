@@ -2,14 +2,16 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Objects;
 import java.util.Vector;
 
 public class Reducer {
+
+    static String username;
+
     public static void main(String[] args) throws IOException {
         String dirname = Paths.get(args[0]).toAbsolutePath().toString();
+        username = args[1];
         System.out.println(dirname);
         File directory = new File(dirname);
 
@@ -32,27 +34,33 @@ public class Reducer {
 
     }
 
+    static String getBaseDirectory(String subdir) {
+        return String.format("/tmp/%s/%s", username, subdir);
+    }
+
     static void reduce(String id, File[] commonFiles) throws IOException {
         int count = 0;
         for (File file : commonFiles) {
-            BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
-            String line;
-            String key = null;
-            while ((line = bufferedReader.readLine()) != null) {
-                String[] keyValue = line.split(" ");
-                count += Integer.parseInt(keyValue[1]);
-                key = keyValue[0];
-            }
-            try {
-                String outputFile = "/tmp/amponsem/reduces/" + id + ".txt";
+            try (BufferedReader bufferedReader = new BufferedReader(new FileReader(file))) {
+                String line;
+                String key = null;
+                while ((line = bufferedReader.readLine()) != null) {
+                    String[] keyValue = line.split(" ");
+                    count += Integer.parseInt(keyValue[1]);
+                    key = keyValue[0];
+                }
+                try {
+                    String outputFile = String.format("%s/%d.txt", getBaseDirectory("reduces"), id);
 
-                Files.write(Paths.get(outputFile), (key + " " + count + "\n").getBytes(StandardCharsets.UTF_8));
-                System.out.println(key + " " + count);
-            } catch (Exception e) {
+                    Files.write(Paths.get(outputFile), (key + " " + count + "\n").getBytes(StandardCharsets.UTF_8));
+                    System.out.println(key + " " + count);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            } catch (NumberFormatException e) {
                 e.printStackTrace();
             }
         }
-
 
     }
 }

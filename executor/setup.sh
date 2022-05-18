@@ -3,72 +3,123 @@
 ARGS=$@
 if [ $# -eq 0 ];
 then
-	printf "Usage: ./setup.sh -m [map-reduce], [sequential]"
+    printf "Usage: ./setup.sh -m [[map-reduce] | [sequential] | [clean]]"
 fi
 
-__sequential() 
+__sequential()
 {
-	java -Xms2048m -Xmx2048m -jar Sequential/target/Sequential-1.0-SNAPSHOT.jar $1	
+    java -Xms2048m -Xmx2048m -jar Sequential/target/Sequential-1.0-SNAPSHOT.jar $1
 }
 
 __mvn_setup()
 {
-	mvn clean && mvn package
+    mvn clean && mvn package
 }
 
-__map_reduce() 
+__get_project_root()
 {
-	if [[ "$#" != 3 ]];
-	then
-		printf "Usage: ./setup.sh -m map-reduce [data-file] [output_dir] [remote-ips]\n"
-		exit 1
-	fi
-	INPUT_FILE=$(realpath $1)
-	PROJECT_ROOT=$(realpath $2)
-	REMOTE_MACHINES_FILE=$(realpath $3)
+    echo $(realpath $(dirname ${BASH_SOURCE[0]}))/../
+}
 
-	echo INPUT FILE $INPUT_FILE
-	echo PROJECT ROOT $PROJECT_ROOT 
-	echo REMOTE MACHINES FILE $REMOTE_MACHINES_FILE
+__create_build_dir()
+{
+	echo -e  "---- [ Creating build directory] ----\n"
+    local build_dir=`__get_project_root`/build
+    if [ ! -d ${build_dir} ];
+    then
+        mkdir -p ${build_dir}/jars ${build_dir}/splits ${build_dir}/output
+    fi
+}
+
+__clean_build_dir()
+{
+	printf "\033[1m--- [ Cleaning build directory ] ---\n"
+    local build_dir=`__get_project_root`/build
+    if [ -d ${build_dir} ];
+    then
+        rm -r ${build_dir}
+    fi
+}
+
+__copy_jars()
+{
+	__create_build_dir
+    local PROJECT_ROOT=`__get_project_root`
+    local jars=${PROJECT_ROOT}/build/jars
+    if [ ! -d ${jars} ];
+    then
+        mkdir ${jars}
+    fi
+    
+    if [ ! -d ${jars}/libs ];
+    then
+        mkdir ${jars}/libs
+    fi
+    
+    directories=("Cleaner" "Deployer" "CommandRunner" "Mapper" "Reducer" "Shuffler")
+    for __dir in ${directories[@]}
+    do
+        cp ${PROJECT_ROOT}${__dir}/target/*.jar ${jars}
+        if [ -d ${PROJECT_ROOT}${__dir}/target/libs ];
+        then
+            cp ${PROJECT_ROOT}${__dir}/target/libs/* ${jars}/libs
+        fi
+    done
+}
 
 
-	# File containing remote machines
-	OUTPUT_FOLDER=$PROJECT_ROOT/output
-	SPLITS_FOLDER=$PROJECT_ROOT/splits
-	SETUP_FILE=$(realpath "${BASH_SOURCE[0]}")
+__map_reduce()
+{
+    if [[ "$#" != 3 ]];
+    then
+        printf "Usage: ./setup.sh -m map-reduce [data-file] [remote-ips] [username]\n"
+        exit 1
+    fi
+    INPUT_FILE=$(realpath $1)
+    PROJECT_ROOT=`__get_project_root`
+    REMOTE_MACHINES_FILE=$(realpath $2)
+    USERNAME=$3
+	BUILD_DIR=${PROJECT_ROOT}/build
+    
+    echo INPUT FILE $INPUT_FILE
+    echo PROJECT ROOT $PROJECT_ROOT
+    echo REMOTE MACHINES FILE $REMOTE_MACHINES_FILE
+    echo USERNAME ${USERNAME}
+    
+    # File containing remote machines
+    SETUP_FILE=$(realpath "${BASH_SOURCE[0]}")
+    
+    echo $SETUP_FILE
+    
 
-	echo $SETUP_FILE
+    JARS_DIR=${BUILD_DIR}/jars
 
-	SETUP_FILES_FOLDER=$(realpath $(dirname ${BASH_SOURCE[0]}))
-	echo $SETUP_FILES_FOLDER
-
-	rm -rf $SPLITS_FOLDER
-	mkdir $SPLITS_FOLDER
-
-	rm -rf $OUTPUT_FOLDER 
-	mkdir -p $OUTPUT_FOLDER 
-	echo "Created ${OUTPUT_FOLDER}"
-	echo ${BASE_SOURCE[0]}
-	#Clean remote computers
-	echo "Executing cleaner..."
-	java -jar $SETUP_FILES_FOLDER/../Cleaner/target/cleaner-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE
-
-	echo "Executing deployer..."
-	java -Xms2048m -Xmx2048m -jar $SETUP_FILES_FOLDER/../Deployer/target/deployer-1.0-SNAPSHOT.jar $REMOTE_MACHINES_FILE $INPUT_FILE $PROJECT_ROOT $SETUP_FILES_FOLDER | tee >(grep "TIME-TAKEN") >(grep "PROGRAM-TOTAL") > /dev/null
+    echo "Executing cleaner..."
+    java -jar ${JARS_DIR}/cleaner-1.0-SNAPSHOT.jar "${REMOTE_MACHINES_FILE}" "${USERNAME}"
+    
+    echo "Executing deployer..."
+    java -Xms2048m -Xmx2048m -jar ${JARS_DIR}/deployer-1.0-SNAPSHOT.jar "${REMOTE_MACHINES_FILE}" "${INPUT_FILE}" "${PROJECT_ROOT}" "${PROJECT_ROOT}" "${USERNAME}"
 }
 
 SWITCH=$1
 if [ $SWITCH == "-m" ] || [ $SWITCH == "-M" ];
 then
-	TYPE=$2
-	shift 2
-	case "${TYPE}" in
-		"map-reduce")
-			__mvn_setup
-			__map_reduce $@
+    TYPE=$2
+    shift 2
+    case "${TYPE}" in
+        "map-reduce")
+            if [[ ${MAVEN_COMPILE} == 1 ]];
+            then
+                __mvn_setup || return
+                __copy_jars `__get_project_root`
+            fi
+            __map_reduce $@
+        ;;
+        "sequential")
+            __sequential $@
+        ;;
+		"clean")
+			__clean_build_dir
 		;;
-		"sequential")
-			__sequential $@
-		;;
-	esac
+    esac
 fi

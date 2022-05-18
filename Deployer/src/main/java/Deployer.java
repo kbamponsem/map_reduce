@@ -11,29 +11,37 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class Deployer {
+    public static String username;
+    public static String BUILD_PATH;
+
     public static void main(String[] args) throws IOException {
         String machines = args[0];
         String inputFile = Paths.get(args[1]).toAbsolutePath().toString();
         String projectPath = args[2];
+        BUILD_PATH = projectPath + "/build";
         String setupFilesPath = args[3];
+        username = args[4];
         long ipsWithSplits = 0;
 
         ArrayList<String> workingIps = checkAvailableMachines(machines);
-
+        /*
+         * By using the list of working IP's we deploy using the **CommandRunner.java**
+         * class to deploy the
+         * various stages of map-reduce
+         */
         if (!workingIps.isEmpty()) {
             ipsWithSplits = splitInputFile(inputFile, workingIps, projectPath);
 
-            System.out.println(ipsWithSplits);
+            workingIps = workingIps.stream().limit(ipsWithSplits).collect(Collectors.toCollection(ArrayList::new));
+            saveWorkingMachines(workingIps, projectPath);
+            initializeEnvironment(workingIps, setupFilesPath);
+            startCommandRunner(workingIps, projectPath, setupFilesPath);
+
+            System.out.println("Compiling output...");
+            compileOutput();
+
+            System.exit(1);
         }
-
-        workingIps = workingIps.stream().limit(ipsWithSplits).collect(Collectors.toCollection(ArrayList::new));
-        saveWorkingMachines(workingIps, projectPath);
-        initializeEnvironment(workingIps, setupFilesPath);
-        startCommandRunner(workingIps, projectPath, setupFilesPath);
-
-        compileOutput(projectPath);
-
-        System.exit(1);
     }
 
     static int splitInputFile(String inputFile, ArrayList<String> workingIps, String projectPath) throws IOException {
@@ -46,6 +54,8 @@ public class Deployer {
         }
 
         int index = 0;
+
+        System.out.println("Has next: " + it.hasNext());
         try {
             while (it.hasNext()) {
                 String line = it.nextLine();
@@ -69,27 +79,36 @@ public class Deployer {
         Files.write(Paths.get(projectPath + "/machines.txt"), output.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    static void compileOutput(String projectPath) throws IOException {
-        File outputDir = new File(projectPath + "/output");
+    static void compileOutput() throws IOException {
+        File outputDir = new File(BUILD_PATH + "/output");
         StringBuilder output = new StringBuilder();
 
+        if (!outputDir.isDirectory()) {
+            System.out.println(outputDir.getAbsolutePath() + " is not a directory!");
+            return;
+        }
         for (File file : Objects.requireNonNull(outputDir.listFiles())) {
             try (BufferedReader bufferedReader = new BufferedReader(new FileReader(file))) {
                 String line;
 
                 while ((line = bufferedReader.readLine()) != null) {
+                    System.out.println(line);
                     output.append(line).append("\n");
                 }
             }
         }
 
-        String outputFile = projectPath + "/output/OUTPUT.txt";
+        String outputFile = BUILD_PATH + "/output/OUTPUT.txt";
         Files.write(Paths.get(outputFile), output.toString().getBytes(StandardCharsets.UTF_8));
 
     }
 
     static boolean isNumeric(String s) {
         return Double.isNaN(Double.parseDouble(s));
+    }
+
+    static String getBaseDirectory(String subdir) {
+        return String.format("/tmp/%s/%s", username, subdir);
     }
 
     static void startCommandRunner(ArrayList<String> workingIps, String projectPath, String setupFilesPath)
@@ -105,7 +124,7 @@ public class Deployer {
 
         for (String ip : workingIps) {
             ProcessBuilder master = new ProcessBuilder("java", "-Xms2048m", "-Xmx2048m", "-jar",
-                    setupFilesPath + "/CommandRunner/target/CommandRunner-1.0-SNAPSHOT.jar", ip,
+                    setupFilesPath + "/CommandRunner/target/command-runner-1.0-SNAPSHOT.jar", ip,
                     String.valueOf(index.get()), projectPath + "/machines.txt", projectPath);
 
             System.out.println("Starting program on [" + ip + "] [index " + index + "] : ");
@@ -114,8 +133,9 @@ public class Deployer {
 
             masterProcs.add(p);
             index.addAndGet(1);
-
         }
+
+        System.out.println("Master processes: " + masterProcs.size());
 
         for (Process p : masterProcs) {
             try {
@@ -132,25 +152,25 @@ public class Deployer {
 
                 while (scanner.hasNextLine()) {
                     results = scanner.nextLine();
+                    System.out.println("Results: " + results);
                     if (results.contains("TOTAL")) {
                         String _results = results;
                         String[] totals = _results.split(" ");
                         total += Double.parseDouble(totals[2]);
                     }
                     System.out.println("Output: " + results);
-                    if (results.contains("/tmp/amponsem/maps/")) {
+                    if (results.contains(getBaseDirectory("maps"))) {
                         mapProcess.add(results);
                     }
-                    if (results.contains("/tmp/amponsem/shuffles/")) {
+                    if (results.contains(getBaseDirectory("shuffles"))) {
                         shuffleProcess.add(results);
                     }
-                    if (results.contains("/tmp/amponsem/shufflesReceived/")) {
+                    if (results.contains(getBaseDirectory("shufflesReceived/"))) {
                         shufflesReceived.add(results);
                     }
                 }
 
                 try (Scanner pScanner = new Scanner(p.getErrorStream());) {
-
                     while (scanner.hasNextLine()) {
                         results = scanner.nextLine();
                         System.out.println("[ERROR] " + results);
@@ -203,7 +223,6 @@ public class Deployer {
 
     static ArrayList<String> checkAvailableMachines(String machines) throws IOException {
         Scanner scanner = new Scanner(new FileInputStream(machines));
-        // ArrayList<String> workingIps = new ArrayList<>();
         ArrayList<String> ips = new ArrayList<>();
         HashMap<Process, String> processes = new HashMap<>();
 
@@ -258,7 +277,7 @@ public class Deployer {
                 setupFilesPath + "/Mapper/target/mapper-1.0-SNAPSHOT.jar",
                 setupFilesPath + "/Shuffler/target/shuffler-1.0-SNAPSHOT.jar",
                 setupFilesPath + "/Reducer/target/reducer-1.0-SNAPSHOT.jar",
-                "amponsem@" + ip + ":/tmp/amponsem");
+                username + "@" + ip + ":" + getBaseDirectory(""));
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         Future<String> future = executor.submit(() -> {
@@ -281,8 +300,8 @@ public class Deployer {
     }
 
     static void makeRootDirectory(String ip) throws IOException {
-        ProcessBuilder mkdirProcessBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip,
-                "mkdir -p /tmp/amponsem/");
+        ProcessBuilder mkdirProcessBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", username + "@" + ip,
+                "mkdir -p " + getBaseDirectory(""));
 
         Process mkdirProcess = setupProcess(mkdirProcessBuilder);
 
@@ -290,12 +309,12 @@ public class Deployer {
     }
 
     static void initializeEnvironment(ArrayList<String> workingIps, String setupFilesPath) {
+        System.out.println("Intializing environment...");
         workingIps.forEach(ip -> {
-
             System.out.println("IP: " + ip);
-            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", "amponsem@" + ip,
-                    "ls /tmp/amponsem");
-
+            ProcessBuilder processBuilder = new ProcessBuilder("ssh", "-o ConnectTimeout=2", username + "@" + ip,
+                    "ls " + getBaseDirectory(""));
+            System.out.println(Arrays.toString(processBuilder.command().toArray()));
             try {
                 Process p = processBuilder.start();
 

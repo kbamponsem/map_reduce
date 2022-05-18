@@ -1,0 +1,13 @@
+
+set term postscript eps color 18
+set ytic auto
+set xtic auto
+
+set title "Speed up against number of nodes"
+set xlabel "Number of nodes"
+set ylabel "Speed up"
+
+set output output_file
+plot input_file with linespoints pt 2 lw 3 lc 'blue' notitle
+set output
+quit
