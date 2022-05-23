@@ -3,7 +3,7 @@
 ARGS=$@
 if [ $# -eq 0 ];
 then
-    printf "Usage: ./setup.sh -m [[map-reduce] | [sequential] | [clean]]"
+    printf "\n\tUsage: ./setup.sh -m [[map-reduce] | [sequential] | [clean]]\n\n"
 fi
 
 __sequential()
@@ -23,7 +23,7 @@ __get_project_root()
 
 __create_build_dir()
 {
-	echo -e  "---- [ Creating build directory] ----\n"
+    echo -e  "---- [ Creating build directory] ----\n"
     local build_dir=`__get_project_root`/build
     if [ ! -d ${build_dir} ];
     then
@@ -33,7 +33,7 @@ __create_build_dir()
 
 __clean_build_dir()
 {
-	printf "\033[1m--- [ Cleaning build directory ] ---\n"
+    printf "\033[1m--- [ Cleaning build directory ] ---\n"
     local build_dir=`__get_project_root`/build
     if [ -d ${build_dir} ];
     then
@@ -43,7 +43,7 @@ __clean_build_dir()
 
 __copy_jars()
 {
-	__create_build_dir
+    __create_build_dir
     local PROJECT_ROOT=`__get_project_root`
     local jars=${PROJECT_ROOT}/build/jars
     if [ ! -d ${jars} ];
@@ -72,14 +72,14 @@ __map_reduce()
 {
     if [[ "$#" != 3 ]];
     then
-        printf "Usage: ./setup.sh -m map-reduce [data-file] [remote-ips] [username]\n"
+        printf "\n\tUsage: ./setup.sh -m map-reduce [data-file] [remote-ips] [username]\n\n"
         exit 1
     fi
     INPUT_FILE=$(realpath $1)
     PROJECT_ROOT=`__get_project_root`
     REMOTE_MACHINES_FILE=$(realpath $2)
     USERNAME=$3
-	BUILD_DIR=${PROJECT_ROOT}/build
+    BUILD_DIR=${PROJECT_ROOT}/build
     
     echo INPUT FILE $INPUT_FILE
     echo PROJECT ROOT $PROJECT_ROOT
@@ -91,9 +91,11 @@ __map_reduce()
     
     echo $SETUP_FILE
     
-
+    
     JARS_DIR=${BUILD_DIR}/jars
-
+    
+    cp ${REMOTE_MACHINES_FILE} ${BUILD_DIR}
+    
     echo "Executing cleaner..."
     java -jar ${JARS_DIR}/cleaner-1.0-SNAPSHOT.jar "${REMOTE_MACHINES_FILE}" "${USERNAME}"
     
@@ -102,7 +104,7 @@ __map_reduce()
 }
 
 SWITCH=$1
-if [ $SWITCH == "-m" ] || [ $SWITCH == "-M" ];
+if [ "${SWITCH}" == "-m" ] || [ "${SWITCH}" == "-M" ];
 then
     TYPE=$2
     shift 2
@@ -113,13 +115,21 @@ then
                 __mvn_setup || return
                 __copy_jars `__get_project_root`
             fi
+            if [ ! -d `__get_project_root`/build ]
+            then
+                echo -e "\n\t---- [ Build directory does not exist] ----\n\tPlease run the command with MAVEN_COMPILE=1\n"
+                exit 1
+            fi
             __map_reduce $@
         ;;
         "sequential")
             __sequential $@
         ;;
-		"clean")
-			__clean_build_dir
-		;;
+        "clean")
+            __clean_build_dir
+        ;;
+        *)
+            printf "\n\tUsage: ./setup.sh -m [[map-reduce] | [sequential] | [clean]]\n\n"
+        ;;
     esac
 fi

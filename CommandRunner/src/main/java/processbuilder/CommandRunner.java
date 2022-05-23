@@ -5,58 +5,63 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class CommandRunner {
-    static String username;
+    public static String username;
+    public static String BUILD_PATH;
 
     public static void main(String[] args) throws IOException, InterruptedException {
         String ip = args[0];
         int index = Integer.parseInt(args[1]);
         String workingMachines = args[2];
         String projectPath = args[3];
+        BUILD_PATH = projectPath + "/build";
         username = args[4];
 
         ArrayList<String> splits = new ArrayList<>();
 
-        File splitsDirectory = new File(projectPath + "/splits");
+        File splitsDirectory = new File(BUILD_PATH + "/splits");
+
+        System.out.println("Running command on [" + ip + "] on directory " + username);
 
         for (File file : Objects.requireNonNull(splitsDirectory.listFiles())) {
             splits.add(file.getAbsolutePath());
         }
-
-        System.out.println(Arrays.toString(splits.stream().sorted().toArray()));
-
         makeDir(ip, "shufflesReceived");
-        makeDir(ip, "splits");
-        makeDir(ip, "maps");
-        makeDir(ip, "shuffles");
-        makeDir(ip, "reduces");
+        // makeDir(ip, "splits");
+        // makeDir(ip, "maps");
+        // makeDir(ip, "shuffles");
+        // makeDir(ip, "reduces");
 
-        copySplits(splits.stream().sorted().collect(Collectors.toCollection(ArrayList::new)), index, ip);
-        sendMachinesList(ip, workingMachines);
+        // copySplits(splits.stream().sorted().collect(Collectors.toCollection(ArrayList::new)),
+        // index, ip);
+        // sendMachinesList(ip, workingMachines);
 
-        double startTime, endTime, total = 0;
+        // double startTime, endTime, total = 0;
 
-        startTime = System.currentTimeMillis();
-        runMapper(ip, index);
-        endTime = System.currentTimeMillis();
+        // startTime = System.currentTimeMillis();
+        // runMapper(ip, index);
+        // endTime = System.currentTimeMillis();
 
-        System.out.println("[" + ip + "] " + "[MAP] [TIME-TAKEN]: " + (endTime - startTime) + " ms");
-        total += endTime - startTime;
+        // System.out.println("[" + ip + "] " + "[MAP] [TIME-TAKEN]: " + (endTime -
+        // startTime) + " ms");
+        // total += endTime - startTime;
 
-        startTime = System.currentTimeMillis();
-        runShuffler(ip);
-        endTime = System.currentTimeMillis();
-        System.out.println("[" + ip + "] " + "[SHUFFLE] [TIME-TAKEN]: " + (endTime - startTime) + " ms");
-        total += endTime - startTime;
+        // startTime = System.currentTimeMillis();
+        // runShuffler(ip);
+        // endTime = System.currentTimeMillis();
+        // System.out.println("[" + ip + "] " + "[SHUFFLE] [TIME-TAKEN]: " + (endTime -
+        // startTime) + " ms");
+        // total += endTime - startTime;
 
-        startTime = System.currentTimeMillis();
-        runReducer(ip);
-        endTime = System.currentTimeMillis();
-        System.out.println("[" + ip + "] " + "[REDUCE] [TIME-TAKEN]: " + (endTime - startTime) + " ms");
-        total += endTime - startTime;
+        // startTime = System.currentTimeMillis();
+        // runReducer(ip);
+        // endTime = System.currentTimeMillis();
+        // System.out.println("[" + ip + "] " + "[REDUCE] [TIME-TAKEN]: " + (endTime -
+        // startTime) + " ms");
+        // total += endTime - startTime;
 
-        System.out.println("[TOTAL] [TIME-TAKEN]: " + total + " ms");
+        // System.out.println("[TOTAL] [TIME-TAKEN]: " + total + " ms");
 
-        copyReducesToLocal(ip, projectPath);
+        // copyReducesToLocal(ip, projectPath);
 
     }
 
@@ -189,55 +194,62 @@ public class CommandRunner {
 
     private static void readLines(Process p) throws IOException {
 
-        Scanner scanner = new Scanner(p.getInputStream());
-        while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            System.out.println(line);
+        try (Scanner scanner = new Scanner(p.getInputStream());) {
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine();
+                System.out.println(line);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
 
-        scanner = new Scanner(p.getErrorStream());
+        try (Scanner scanner = new Scanner(p.getErrorStream())) {
 
-        while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            System.out.println(line);
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine();
+                System.out.println(line);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
 
         p.destroy();
     }
 
+    static String getBaseDirectory(String subdir) {
+        return String.format("/tmp/%s/%s", username, subdir);
+    }
+
     static void makeDir(String ip, String name) throws IOException {
-        ProcessBuilder processBuilder = new ProcessBuilder("ssh", username + "@" + ip,
-                String.format("ls /tmp/%s/%s", username, name));
 
-        Process p = processBuilder.start();
+        ProcessBuilder mkdirBuilder = new ProcessBuilder("bash", "-c",
+                "ssh -o ConnectTimeout=2 " + username + "@" + ip + " ls " + getBaseDirectory(""));
+        System.out.println(Arrays.toString(mkdirBuilder.command().toArray()));
+        Process mkdirProcess = mkdirBuilder.start();
 
-        BufferedReader errorStream = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-        String errorLine;
-        try {
-            while (errorStream.readLine() != null) {
-                ProcessBuilder mkdirBuilder = new ProcessBuilder("ssh", username + "@" + ip,
-                        String.format("mkdir -p /tmp/%s/%s", username, name));
-
-                Process mkdirProcess = mkdirBuilder.start();
-
-                BufferedReader mkdirErrorStream = new BufferedReader(
-                        new InputStreamReader(mkdirProcess.getErrorStream()));
-
-                while ((errorLine = mkdirErrorStream.readLine()) != null) {
-                    System.out.println("Error: " + errorLine);
-                }
-                mkdirProcess.destroy();
+        try (BufferedReader mkdirErrorStream = new BufferedReader(
+                new InputStreamReader(mkdirProcess.getErrorStream()));) {
+            String errorLine;
+            while ((errorLine = mkdirErrorStream.readLine()) != null) {
+                System.out.println("Error: " + errorLine);
             }
         } catch (Exception e) {
             e.printStackTrace();
-        } finally {
-            try {
-                errorStream.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
         }
-        p.destroy();
+
+        try (BufferedReader success = new BufferedReader(
+                new InputStreamReader(mkdirProcess.getInputStream()));) {
+            String errorLine;
+            while ((errorLine = success.readLine()) != null) {
+                System.out.println("Success: " + errorLine);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        mkdirProcess.destroy();
+
     }
 
 }
