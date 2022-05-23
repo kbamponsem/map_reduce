@@ -112,7 +112,13 @@ then
         "map-reduce")
             if [[ ${MAVEN_COMPILE} == 1 ]];
             then
-                __mvn_setup || return
+                output=`__mvn_setup | grep ERROR`
+                
+                if [[ ${output} != "" ]];
+                then
+                    printf "\n\t---- [ MAVEN FAILED TO COMPILE ] ----\n\n"
+                    exit 1
+                fi
                 __copy_jars `__get_project_root`
             fi
             if [ ! -d `__get_project_root`/build ]
